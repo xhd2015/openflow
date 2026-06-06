@@ -83,7 +83,7 @@ func Shell(cmdStr string, opts ShellOpts) ShellResult {
 	absPwd, _ := filepath.Abs(shellDir)
 
 	cmd := exec.Command("bash", "-c", cmdStr)
-	cmd.Dir = shellDir
+	cmd.Dir = absPwd
 	stdout := &strings.Builder{}
 	stderr := &strings.Builder{}
 	cmd.Stdout = stdout

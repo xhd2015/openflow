@@ -72,17 +72,38 @@ func Run(ctx context.Context, opts Options) (*RunResult, error) {
 		return nil, err
 	}
 
-	sdkModuleDir := filepath.Join(absWorkspace, ".openflow-sdk")
-	if err := ExtractSDK(sdkModuleDir); err != nil {
+	moduleDir, err := os.MkdirTemp("", "openflow-run-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp module dir: %w", err)
+	}
+	defer os.RemoveAll(moduleDir)
+
+	sdkDir := filepath.Join(moduleDir, "openflow-sdk")
+	if err := ExtractSDK(sdkDir); err != nil {
 		return nil, fmt.Errorf("extract SDK: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "[openflow] SDK extracted to: %s\n", sdkModuleDir)
 
-	goWorkPath, cleanup, err := PrepGoModule(absWorkspace, sdkModuleDir)
+	workflowSrc, err := os.ReadFile(absOpenflowFile)
 	if err != nil {
-		return nil, fmt.Errorf("prepare Go module: %w", err)
+		return nil, fmt.Errorf("read workflow file: %w", err)
 	}
-	defer cleanup()
+	workflowSrc = stripBuildTags(workflowSrc)
+	workflowDst := filepath.Join(moduleDir, "workflow.go")
+	if err := os.WriteFile(workflowDst, workflowSrc, 0644); err != nil {
+		return nil, fmt.Errorf("write workflow file: %w", err)
+	}
+
+	goMod := `module openflow-run
+
+go 1.25
+
+require github.com/xhd2015/openflow/sdk v0.0.0
+
+replace github.com/xhd2015/openflow/sdk => ./openflow-sdk
+`
+	if err := os.WriteFile(filepath.Join(moduleDir, "go.mod"), []byte(goMod), 0644); err != nil {
+		return nil, fmt.Errorf("write go.mod: %w", err)
+	}
 
 	openflowBin := strings.TrimSpace(opts.OpenflowBin)
 	if openflowBin == "" {
@@ -93,12 +114,19 @@ func Run(ctx context.Context, opts Options) (*RunResult, error) {
 		openflowBin = bin
 	}
 
+	binaryPath := filepath.Join(moduleDir, "openflow-run")
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", binaryPath, ".")
+	buildCmd.Dir = moduleDir
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("build workflow: %s\n%s", err, out)
+	}
+
 	start := time.Now()
-	fmt.Fprintf(os.Stderr, "[openflow] running: go run %s (workspace: %s)\n", absOpenflowFile, absWorkspace)
-	cmd := exec.CommandContext(ctx, "go", "run", "-tags", "openflow", absOpenflowFile)
+	fmt.Fprintf(os.Stderr, "[openflow] running: %s (workspace: %s)\n", absOpenflowFile, absWorkspace)
+
+	cmd := exec.CommandContext(ctx, binaryPath)
 	cmd.Dir = absWorkspace
 	cmd.Env = append(os.Environ(),
-		"GOWORK="+goWorkPath,
 		"OPENFLOW_HOME="+openflowHome,
 		"OPENFLOW_RUN_ID="+runID,
 		"OPENFLOW_BIN="+openflowBin,
@@ -131,45 +159,17 @@ func Run(ctx context.Context, opts Options) (*RunResult, error) {
 	}, runErr
 }
 
-func PrepGoModule(workspace string, sdkModuleDir string) (goWorkPath string, cleanup func(), err error) {
-	noop := func() {}
-
-	workspaceHasMod := false
-	if _, err := os.Stat(filepath.Join(workspace, "go.mod")); err == nil {
-		workspaceHasMod = true
-	}
-
-	if !workspaceHasMod {
-		modContent := fmt.Sprintf("module openflow-workspace\n\ngo 1.25\n")
-		if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte(modContent), 0644); err != nil {
-			return "", noop, fmt.Errorf("write go.mod: %w", err)
+func stripBuildTags(src []byte) []byte {
+	lines := strings.Split(string(src), "\n")
+	var out []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//go:build openflow") || strings.HasPrefix(trimmed, "// +build openflow") {
+			continue
 		}
+		out = append(out, line)
 	}
-
-	absSDK, err := filepath.Abs(sdkModuleDir)
-	if err != nil {
-		return "", noop, err
-	}
-
-	relSDK, err := filepath.Rel(workspace, absSDK)
-	if err != nil {
-		return "", noop, err
-	}
-
-	goWorkContent := fmt.Sprintf("go 1.25\n\nuse .\nuse ./%s\n", relSDK)
-	goWorkPath = filepath.Join(workspace, "go.work.tmp")
-	if err := os.WriteFile(goWorkPath, []byte(goWorkContent), 0644); err != nil {
-		return "", noop, fmt.Errorf("write go.work: %w", err)
-	}
-
-	cleanup = func() {
-		os.Remove(goWorkPath)
-		if !workspaceHasMod {
-			os.Remove(filepath.Join(workspace, "go.mod"))
-		}
-	}
-
-	return goWorkPath, cleanup, nil
+	return []byte(strings.Join(out, "\n"))
 }
 
 func ExtractSDK(destDir string) error {

@@ -12,9 +12,7 @@ func TestRun_ValidGoFile(t *testing.T) {
 	dir := t.TempDir()
 
 	sdkFile := filepath.Join(dir, "workflow.openflow.go")
-	content := []byte(`//go:build openflow
-
-package main
+	content := []byte(`package main
 
 import . "github.com/xhd2015/openflow/sdk"
 
@@ -54,9 +52,7 @@ func TestRun_ShellWithFeedback(t *testing.T) {
 	dir := t.TempDir()
 
 	sdkFile := filepath.Join(dir, "workflow.openflow.go")
-	content := []byte(`//go:build openflow
-
-package main
+	content := []byte(`package main
 
 import . "github.com/xhd2015/openflow/sdk"
 
@@ -91,9 +87,7 @@ func TestRun_ShellMissingName(t *testing.T) {
 	dir := t.TempDir()
 
 	sdkFile := filepath.Join(dir, "workflow.openflow.go")
-	content := []byte(`//go:build openflow
-
-package main
+	content := []byte(`package main
 
 import . "github.com/xhd2015/openflow/sdk"
 
@@ -130,9 +124,7 @@ func TestRun_AgentMissingName(t *testing.T) {
 	dir := t.TempDir()
 
 	sdkFile := filepath.Join(dir, "workflow.openflow.go")
-	content := []byte(`//go:build openflow
-
-package main
+	content := []byte(`package main
 
 import . "github.com/xhd2015/openflow/sdk"
 

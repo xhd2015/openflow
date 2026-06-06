@@ -44,8 +44,8 @@ func run() int {
 		fmt.Printf("temp dir kept: %s\n", dir)
 	}()
 
-	exampleSrc := filepath.Join("test", "integrations", "run-example", "example.openflow.go")
-	exampleDst := filepath.Join(dir, "example.openflow.go")
+	exampleSrc := filepath.Join("test", "integrations", "run-example", "example.openflow.go.txt")
+	exampleDst := filepath.Join(dir, "example.openflow.go.txt")
 	if out, err := exec.Command("cp", exampleSrc, exampleDst).CombinedOutput(); err != nil {
 		fail("copy example", fmt.Sprintf("%s\n%s", err, out))
 		printTiming(start)

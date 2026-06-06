@@ -55,6 +55,14 @@ func run() int {
 		return 1
 	}
 
+	modInit := exec.Command("go", "mod", "init", "merge")
+	modInit.Dir = bugDir
+	if out, err := modInit.CombinedOutput(); err != nil {
+		fail("Precondition: go mod init merge", fmt.Sprintf("%s\n%s", err, out))
+		return 1
+	}
+	pass("Precondition: go mod init merge")
+
 	bugTest := exec.Command("go", "test", "./...")
 	bugTest.Dir = bugDir
 	_, bugErr := bugTest.CombinedOutput()
@@ -77,10 +85,10 @@ func run() int {
 	}
 	pass("Build openflow binary")
 
-	workflowFile := filepath.Join(dir, "fix-merge.openflow.go")
+	genWorkflowFile := filepath.Join(dir, "fix-merge.openflow.go")
 	createCmd := exec.Command(openflowBin, "create",
 		"Fix MergeJSON in merge.go so nested maps are recursively merged instead of replaced",
-		"--out", workflowFile,
+		"--out", genWorkflowFile,
 		"--dir", dir,
 	)
 	createCmd.Env = append(os.Environ(),
@@ -96,7 +104,7 @@ func run() int {
 	}
 	pass("openflow create")
 
-	info, statErr := os.Stat(workflowFile)
+	info, statErr := os.Stat(genWorkflowFile)
 	if statErr != nil {
 		fail("openflow create: file exists", statErr.Error())
 		printTiming(start)
@@ -109,14 +117,12 @@ func run() int {
 	}
 	pass("openflow create: file non-empty")
 
-	content, readErr := os.ReadFile(workflowFile)
+	content, readErr := os.ReadFile(genWorkflowFile)
 	if readErr != nil {
 		fail("openflow create: readable", readErr.Error())
 		printTiming(start)
 		return 1
 	}
-
-	time.Sleep(1000 * time.Second)
 
 	pass("openflow create: file exists")
 	fmt.Printf("=====openflow======\n%s\n=====openflow======\n", string(content))
@@ -129,7 +135,14 @@ func run() int {
 	}
 	pass("openflow create: contains openflow primitive")
 
-	fmt.Printf("    generated: %s (%d bytes)\n", workflowFile, info.Size())
+	fmt.Printf("    generated: %s (%d bytes)\n", genWorkflowFile, info.Size())
+
+	// rename to .txt
+	workflowFile := genWorkflowFile + ".txt"
+	err = os.Rename(genWorkflowFile, workflowFile)
+	if err != nil {
+		fail("rename", fmt.Sprintf("%s -> %s", genWorkflowFile, workflowFile))
+	}
 
 	// --- Stage 2: openflow run ---
 	fmt.Println("  --- Stage 2: openflow run ---")
@@ -156,7 +169,7 @@ func run() int {
 		_ = os.RemoveAll(filepath.Join(dir, ".openflow-sdk"))
 	}
 
-	verifyTest := exec.Command("go", "test", "./...")
+	verifyTest := exec.Command("go", "-C", "merge", "test", "./...")
 	verifyTest.Dir = bugDir
 	verifyOut, verifyErr := verifyTest.CombinedOutput()
 	if verifyErr != nil {
