@@ -202,7 +202,7 @@ func (a *Agent) Run(task string, opts RunOpts) (string, *AgentOutput, error) {
 				suggestedCmd := strings.TrimSpace(string(content))
 				if suggestedCmd != "" {
 					agentOutput.ShellSuggestions[shellName] = suggestedCmd
-					logMsg("agent", fmt.Sprintf("%s suggestion: %s => %s", a.name, shellName, truncateStr(suggestedCmd, 80)))
+					logMsg("agent", fmt.Sprintf("%s suggestion: %s => %s", a.name, shellName, truncateStr(suggestedCmd, 1024)))
 				}
 				ts := time.Now().Format("20060102_150405")
 				archivedName := shellName + "_" + ts + ".sh"

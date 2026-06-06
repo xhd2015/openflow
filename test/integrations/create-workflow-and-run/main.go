@@ -149,7 +149,7 @@ func run() int {
 
 	runCmd := exec.Command(openflowBin, "run",
 		workflowFile,
-		"--dir", bugDir,
+		"--dir", dir,
 	)
 	runCmd.Env = append(os.Environ(),
 		"OPENFLOW_HOME="+filepath.Join(dir, ".openflow"),
@@ -169,7 +169,7 @@ func run() int {
 		_ = os.RemoveAll(filepath.Join(dir, ".openflow-sdk"))
 	}
 
-	verifyTest := exec.Command("go", "-C", "merge", "test", "./...")
+	verifyTest := exec.Command("go", "test", "./...")
 	verifyTest.Dir = bugDir
 	verifyOut, verifyErr := verifyTest.CombinedOutput()
 	if verifyErr != nil {

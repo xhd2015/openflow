@@ -74,13 +74,38 @@ type ShellResult struct {
 }
 
 func Shell(cmdStr string, opts ShellOpts) ShellResult {
+	res, err := runShell(cmdStr, opts)
+	if err != nil {
+		return ShellResult{
+			Name:     opts.Name,
+			Cmd:      cmdStr,
+			ExitCode: 1,
+			Stderr:   err.Error(),
+			Feedback: ShellFeedback{
+				Name:     opts.Name,
+				Cmd:      cmdStr,
+				ExitCode: 1,
+				Stderr:   err.Error(),
+			},
+		}
+	}
+	return res
+}
+func runShell(cmdStr string, opts ShellOpts) (ShellResult, error) {
 	startMs := time.Now()
 
 	shellDir := opts.Dir
 	if shellDir == "" {
-		shellDir, _ = os.Getwd()
+		var err error
+		shellDir, err = os.Getwd()
+		if err != nil {
+			return ShellResult{}, fmt.Errorf("getcwd: %w", err)
+		}
 	}
-	absPwd, _ := filepath.Abs(shellDir)
+	absPwd, err := filepath.Abs(shellDir)
+	if err != nil {
+		return ShellResult{}, fmt.Errorf("abs: %w", err)
+	}
 
 	cmd := exec.Command("bash", "-c", cmdStr)
 	cmd.Dir = absPwd
@@ -89,7 +114,7 @@ func Shell(cmdStr string, opts ShellOpts) ShellResult {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	var exitCode int
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -145,5 +170,5 @@ func Shell(cmdStr string, opts ShellOpts) ShellResult {
 		Stderr:   errStr,
 		ExitCode: exitCode,
 		Feedback: feedback,
-	}
+	}, nil
 }

@@ -24,10 +24,7 @@ func Run(file string, stdout, stderr io.Writer) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	baseName := filepath.Base(absFile)
-	if strings.HasSuffix(baseName, ".txt") {
-		baseName = strings.TrimSuffix(baseName, ".txt")
-	}
+	baseName := strings.TrimSuffix(filepath.Base(absFile), ".txt")
 	dstFile := filepath.Join(tmpDir, baseName)
 	srcData, err := os.ReadFile(absFile)
 	if err != nil {
@@ -77,7 +74,7 @@ func Run(file string, stdout, stderr io.Writer) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("lint failed")
+		return fmt.Errorf("lint failed: %w", err)
 	}
 
 	return nil

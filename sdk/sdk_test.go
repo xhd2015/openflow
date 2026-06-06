@@ -186,6 +186,29 @@ func TestQuoteArg(t *testing.T) {
 	}
 }
 
+func TestShellWithRelativeDir(t *testing.T) {
+	r := Shell("echo hello", ShellOpts{Name: "rel-dir", Dir: "."})
+	if r.ExitCode != 0 {
+		t.Fatalf("expected exit 0, got %d. stderr: %s", r.ExitCode, r.Stderr)
+	}
+	if !strings.Contains(r.Stdout, "hello") {
+		t.Fatalf("expected stdout 'hello', got %q", r.Stdout)
+	}
+	if r.Pwd == "" {
+		t.Fatal("expected non-empty Pwd with relative dir")
+	}
+}
+
+func TestShellNonexistentDir(t *testing.T) {
+	r := Shell("echo hello", ShellOpts{Name: "bad-dir", Dir: "/nonexistent/path/12345"})
+	if r.ExitCode == 0 {
+		t.Fatal("expected non-zero exit for nonexistent dir")
+	}
+	if r.Stderr == "" {
+		t.Fatal("expected stderr for nonexistent dir")
+	}
+}
+
 func TestStep(t *testing.T) {
 	called := false
 	Step("test-step", func() {
