@@ -1,140 +1,203 @@
-You are generating a .openflow.ts file. This file will be executed by `openflow run <file>` using bun.
+---
+name: openflow
+description: when user want to create an fully automated workflow to implement a feature or fix
+---
+
+You are generating a `.openflow.go` file, which would be run via `openflow run <file>`.
 
 ## SDK API
 
-```ts
-import { Agent, shell, step } from "openflow";
+```go
+import . "github.com/xhd2015/openflow/sdk"
 ```
+
+All SDK functions are available without prefix after a dot import.
 
 ### Agent
-```ts
-new Agent({ name?: string, systemPrompt: string, agentRunner?: string, model?: string })
-agent.run(task: string, opts?: { feedback?: string }): Promise<string>
-```
 
-Agent invokes an LLM through agent-pro to do work (edit files, run commands, etc.).
+An agent invokes an LLM through `openflow exec` to do work (edit files, run commands, etc.).
 The `task` describes WHAT to do; the `systemPrompt` controls HOW.
 On the first call, the full systemPrompt + task is sent. On subsequent calls with
-`{ feedback }`, the agent enters resume mode — only the feedback is sent to continue
+`{Feedback: feedback}`, the agent enters resume mode — only the feedback is sent to continue
 the existing session.
 
-### shell
+```go
+type AgentOpts struct {
+    Name         string  // auto-derived from systemPrompt if empty
+    SystemPrompt string  // required
+    AgentRunner  string  // e.g. "opencode" (default from OPENFLOW_AGENT_RUNNER)
+    Model        string  // optional model override
+}
 
-```ts
-shell(cmd: string, opts?: { cwd?: string, env?: Record<string,string> }): Promise<{
-  stdout: string, stderr: string, exitCode: number,
-  feedback: string
-}>
+func NewAgent(opts AgentOpts) *Agent
+
+type RunOpts struct {
+    Feedback string
+}
+
+func (a *Agent) Run(task string, opts RunOpts) (string, error)
 ```
 
-Runs a shell command. Does NOT throw on non-zero exit — check exitCode.
-`feedback` is always present, ready to pass to `agent.run(task, { feedback })`.
+### Shell
 
-### step
+Runs a shell command. Does NOT panic on non-zero exit — check ExitCode.
+`Feedback` is always present, ready to pass to `agent.Run(task, RunOpts{Feedback: feedback})`.
 
-```ts
-step(label: string, fn: () => Promise<void>): Promise<void>
+```go
+type ShellResult struct {
+    Stdout   string
+    Stderr   string
+    ExitCode int
+    Feedback string
+}
+
+func Shell(cmd string) ShellResult
 ```
+
+### Step
 
 Named checkpoint for trace visualization.
 
+```go
+func Step(label string, fn func())
+```
+
+### Helpers
+
+```go
+func Print(msg string)  // prints a line to stdout
+func S(v int) string    // int to string
+```
+
 ## Rules
-- Output ONLY the .openflow.ts content (no markdown fences, no explanation)
-- Use while/for loops — no custom DSL
-- Use step() around meaningful blocks
-- Use agent.run() for code changes, shell() for commands
-- Do NOT use shell() for editing files — use agent.run() for that
+- Write the `.openflow.go` file using your file editing tools
+- The file MUST be package `main` with a `func main()` entry point
+- Use dot import: `import . "github.com/xhd2015/openflow/sdk"`
+- Use for loops — no custom DSL
+- Use Step() around meaningful blocks
+- Use agent.Run() for code changes, Shell() for commands
+- Do NOT use Shell() for editing files — use agent.Run() for that
+- Always check the error from agent.Run() and Shell().ExitCode
+- On error, Print() a message and use the error/feedback for the next iteration
 
 ## Example — Single Agent
 
-```ts
-import { Agent, shell, step } from "openflow";
+```go
+package main
 
-const coder = new Agent({
-  systemPrompt: "You are a Go programmer. Write clean, tested code.",
-});
+import . "github.com/xhd2015/openflow/sdk"
 
-let feedback = "";
-let done = false;
-let i = 0;
-const MAX = 5;
+func main() {
+    coder := NewAgent(AgentOpts{
+        SystemPrompt: "You are a Go programmer. Write clean, tested code.",
+    })
 
-while (!done && i < MAX) {
-  i++;
-  await step("ITERATION " + i, async () => {
+    feedback := ""
+    done := false
+    i := 0
+    const MAX = 5
 
-    await step("CODE CHANGE", () =>
-      coder.run("Fix the bug in merge.go", { feedback }));
+    for !done && i < MAX {
+        i++
+        Step("ITERATION "+S(i), func() {
+            Step("CODE CHANGE", func() {
+                _, err := coder.Run("Fix the bug in merge.go", RunOpts{Feedback: feedback})
+                if err != nil {
+                    Print("agent failed: " + err.Error())
+                    feedback = err.Error()
+                    return
+                }
+            })
+            feedback = ""
 
-    feedback = "";
+            Step("BUILD & TEST", func() {
+                r := Shell("go test ./...")
+                if r.ExitCode == 0 {
+                    done = true
+                    return
+                }
+                Print("test failed: exit " + S(r.ExitCode))
+                feedback = r.Feedback
+            })
+        })
+    }
 
-    await step("BUILD & TEST", async () => {
-      const r = await shell("go test ./...");
-      if (r.exitCode === 0) {
-        done = true;
-        return;
-      }
-      feedback = r.feedback;
-    });
-
-  });
+    if done {
+        Print("FIXED")
+    } else {
+        Print("GAVE UP")
+    }
 }
-
-console.log(done ? "FIXED" : "GAVE UP");
 ```
 
 ## Example — Multi-Agent
 
-```ts
-import { Agent, shell, step } from "openflow";
+```go
+package main
 
-const coder = new Agent({
-  name: "coder",
-  systemPrompt: "You write Go code. Implement exactly what is asked.",
-});
+import (
+    "strings"
+    . "github.com/xhd2015/openflow/sdk"
+)
 
-const reviewer = new Agent({
-  name: "reviewer",
-  systemPrompt: "You review Go code for bugs and style issues.",
-});
+func main() {
+    coder := NewAgent(AgentOpts{
+        Name:         "coder",
+        SystemPrompt: "You write Go code. Implement exactly what is asked.",
+    })
 
-let feedback = "";
-let done = false;
-let i = 0;
+    reviewer := NewAgent(AgentOpts{
+        Name:         "reviewer",
+        SystemPrompt: "You review Go code for bugs and style issues.",
+    })
 
-while (!done && i < 5) {
-  i++;
-  await step("CODING " + i, async () => {
+    feedback := ""
+    done := false
+    i := 0
 
-    await step("IMPLEMENT", () =>
-      coder.run("Implement an HTTP handler for GET /users", { feedback }));
+    for !done && i < 5 {
+        i++
+        Step("CODING "+S(i), func() {
+            Step("IMPLEMENT", func() {
+                _, err := coder.Run("Implement an HTTP handler for GET /users", RunOpts{Feedback: feedback})
+                if err != nil {
+                    Print("coder failed: " + err.Error())
+                    feedback = err.Error()
+                    return
+                }
+            })
 
-    const r = await shell("go build ./...");
-    if (r.exitCode !== 0) {
-      feedback = r.feedback;
-      return;
+            r := Shell("go build ./...")
+            if r.ExitCode != 0 {
+                Print("build failed: exit " + S(r.ExitCode))
+                feedback = r.Feedback
+                return
+            }
+
+            Step("REVIEW", func() {
+                review, err := reviewer.Run(
+                    "Review this change for bugs",
+                    RunOpts{Feedback: r.Feedback},
+                )
+                if err != nil {
+                    Print("reviewer failed: " + err.Error())
+                    feedback = err.Error()
+                    return
+                }
+                if strings.Contains(strings.ToLower(review), "pass") {
+                    done = true
+                } else {
+                    Print("reviewer found issues")
+                    feedback = "reviewer found issues: " + review
+                }
+            })
+        })
     }
 
-    await step("REVIEW", async () => {
-      const review = await reviewer.run(
-        "Review this change for bugs",
-        { feedback: r.feedback }
-      );
-      if (review.toLowerCase().includes("pass")) {
-        done = true;
-      } else {
-        feedback = "reviewer found issues: " + review;
-      }
-    });
-
-  });
+    if done {
+        Print("DONE")
+    } else {
+        Print("GAVE UP")
+    }
 }
-
-console.log(done ? "DONE" : "GAVE UP");
 ```
-
-# Task
-
-__DESCRIPTION__
-
-Generate the .openflow.ts file now.

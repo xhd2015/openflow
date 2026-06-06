@@ -20,6 +20,7 @@ func run() int {
 	_, _ = lessflags.Bool("--keep-temp", &keepTemp).Parse(os.Args[1:])
 
 	start := time.Now()
+	success := false
 
 	pass := func(label string) {
 		fmt.Printf("  %-55s PASS\n", label)
@@ -31,22 +32,18 @@ func run() int {
 
 	fmt.Println("=== RUN   TestOpenflowMinimalBugFix")
 
-	// --- Setup ---
 	dir, err := os.MkdirTemp("", "openflow-minimal")
 	if err != nil {
 		fail("temp dir", err.Error())
 		return 1
 	}
-	if !keepTemp {
-		defer func() {
+	defer func() {
+		if !success && !keepTemp {
 			_ = os.RemoveAll(dir)
-		}()
-	} else {
-		fmt.Printf("temp dir (--keep-temp): %s\n", dir)
-		defer func() {
-			fmt.Printf("temp dir kept: %s\n", dir)
-		}()
-	}
+			return
+		}
+		fmt.Printf("temp dir kept: %s\n", dir)
+	}()
 
 	// --- Step 0: Precondition — bug exists ---
 	bugDir := filepath.Join(dir, "merge")
@@ -79,18 +76,20 @@ func run() int {
 	}
 	pass("Build openflow binary")
 
-	workflowFile := filepath.Join(dir, "fix-merge.openflow.ts")
+	workflowFile := filepath.Join(dir, "fix-merge.openflow.go")
 	createCmd := exec.Command(openflowBin, "create",
 		"Fix MergeJSON in merge.go so nested maps are recursively merged instead of replaced",
 		"--out", workflowFile,
-		"--dir", bugDir,
+		"--dir", dir,
 	)
 	createCmd.Env = append(os.Environ(),
 		"OPENFLOW_HOME="+filepath.Join(dir, ".openflow"),
 	)
-	createOut, createErr := createCmd.CombinedOutput()
+	fmt.Println("    [creating workflow...]")
+	createCmd.Stdout = os.Stdout
+	createCmd.Stderr = os.Stderr
+	createErr := createCmd.Run()
 	if createErr != nil {
-		fail("openflow create", fmt.Sprintf("exit=%v\nstdout:\n%s", createErr, string(createOut)))
 		printTiming(start)
 		return 1
 	}
@@ -147,7 +146,8 @@ func run() int {
 	}
 	pass("openflow run")
 	if !keepTemp {
-		_ = os.RemoveAll(filepath.Join(bugDir, "node_modules"))
+		_ = os.RemoveAll(filepath.Join(bugDir, ".openflow-sdk"))
+		_ = os.RemoveAll(filepath.Join(dir, ".openflow-sdk"))
 	}
 
 	verifyTest := exec.Command("go", "test", "./...")
@@ -162,6 +162,7 @@ func run() int {
 	pass("Stage 2: bug fixed (go test passes)")
 
 	// --- Done ---
+	success = true
 	fmt.Printf("--- PASS: TestOpenflowMinimalBugFix (%.1fs)\n", time.Since(start).Seconds())
 	return 0
 }
@@ -177,5 +178,3 @@ func indent(s, prefix string) string {
 	}
 	return strings.Join(lines, "\n")
 }
-
-

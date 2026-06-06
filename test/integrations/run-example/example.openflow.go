@@ -1,0 +1,38 @@
+//go:build openflow
+
+package main
+
+import (
+	"os"
+	"strings"
+
+	. "github.com/xhd2015/openflow/sdk"
+)
+
+func main() {
+	agent := NewAgent(AgentOpts{
+		SystemPrompt: "You are a helpful assistant. Keep responses short.",
+	})
+
+	result := ""
+
+	Step("GREET", func() {
+		output, err := agent.Run("Say 'hello from openflow' and nothing else", RunOpts{})
+		if err != nil {
+			panic(err)
+		}
+		result = output
+	})
+
+	Step("VERIFY", func() {
+		r := Shell("echo 'done'")
+		Print(strings.TrimSpace(r.Stdout))
+	})
+
+	if strings.Contains(strings.ToLower(result), "hello") {
+		Print("SUCCESS: workflow completed")
+	} else {
+		Print("UNEXPECTED: agent did not say hello")
+		os.Exit(1)
+	}
+}

@@ -3,8 +3,8 @@ package runner
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
@@ -14,16 +14,16 @@ import (
 	"time"
 )
 
-//go:embed sdk/*
+//go:embed sdk/*.go
 var sdkFS embed.FS
 
 type Options struct {
-	OpenflowFile   string
-	Workspace      string
-	AgentRunner    string
-	Model          string
-	OpenflowHome   string
-	OpenflowBin    string
+	OpenflowFile string
+	Workspace    string
+	AgentRunner  string
+	Model        string
+	OpenflowHome string
+	OpenflowBin  string
 }
 
 type RunResult struct {
@@ -69,22 +69,18 @@ func Run(ctx context.Context, opts Options) (*RunResult, error) {
 		return nil, err
 	}
 
-	// Extract SDK to workspace's node_modules/openflow/
-	sdkDir := filepath.Join(absWorkspace, "node_modules", "openflow")
-	if err := extractSDK(sdkDir); err != nil {
+	sdkModuleDir := filepath.Join(absWorkspace, ".openflow-sdk")
+	if err := ExtractSDK(sdkModuleDir); err != nil {
 		return nil, fmt.Errorf("extract SDK: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "[openflow] SDK extracted to: %s\n", sdkDir)
+	fmt.Fprintf(os.Stderr, "[openflow] SDK extracted to: %s\n", sdkModuleDir)
 
-	// Also extract to the openflow file's directory (for import resolution)
-	fileDir := filepath.Dir(absOpenflowFile)
-	if fileDir != absWorkspace {
-		if err := extractSDK(filepath.Join(fileDir, "node_modules", "openflow")); err != nil {
-			return nil, fmt.Errorf("extract SDK to file dir: %w", err)
-		}
+	goWorkPath, cleanup, err := PrepGoModule(absWorkspace, sdkModuleDir)
+	if err != nil {
+		return nil, fmt.Errorf("prepare Go module: %w", err)
 	}
+	defer cleanup()
 
-	// Resolve openflow binary path (for SDK Agent to shell out to)
 	openflowBin := strings.TrimSpace(opts.OpenflowBin)
 	if openflowBin == "" {
 		bin, err := os.Executable()
@@ -95,10 +91,11 @@ func Run(ctx context.Context, opts Options) (*RunResult, error) {
 	}
 
 	start := time.Now()
-	fmt.Fprintf(os.Stderr, "[openflow] running: bun run %s (workspace: %s)\n", absOpenflowFile, absWorkspace)
-	cmd := exec.CommandContext(ctx, "bun", "run", absOpenflowFile)
+	fmt.Fprintf(os.Stderr, "[openflow] running: go run %s (workspace: %s)\n", absOpenflowFile, absWorkspace)
+	cmd := exec.CommandContext(ctx, "go", "run", "-tags", "openflow", absOpenflowFile)
 	cmd.Dir = absWorkspace
 	cmd.Env = append(os.Environ(),
+		"GOWORK="+goWorkPath,
 		"OPENFLOW_HOME="+openflowHome,
 		"OPENFLOW_RUN_ID="+runID,
 		"OPENFLOW_BIN="+openflowBin,
@@ -113,7 +110,6 @@ func Run(ctx context.Context, opts Options) (*RunResult, error) {
 
 	duration := time.Since(start)
 
-	// Write run metadata
 	status := "completed"
 	exitCode := 0
 	if runErr != nil {
@@ -132,14 +128,57 @@ func Run(ctx context.Context, opts Options) (*RunResult, error) {
 	}, runErr
 }
 
-func extractSDK(destDir string) error {
+func PrepGoModule(workspace string, sdkModuleDir string) (goWorkPath string, cleanup func(), err error) {
+	noop := func() {}
+
+	workspaceHasMod := false
+	if _, err := os.Stat(filepath.Join(workspace, "go.mod")); err == nil {
+		workspaceHasMod = true
+	}
+
+	if !workspaceHasMod {
+		modContent := fmt.Sprintf("module openflow-workspace\n\ngo 1.25\n")
+		if err := os.WriteFile(filepath.Join(workspace, "go.mod"), []byte(modContent), 0644); err != nil {
+			return "", noop, fmt.Errorf("write go.mod: %w", err)
+		}
+	}
+
+	absSDK, err := filepath.Abs(sdkModuleDir)
+	if err != nil {
+		return "", noop, err
+	}
+
+	relSDK, err := filepath.Rel(workspace, absSDK)
+	if err != nil {
+		return "", noop, err
+	}
+
+	goWorkContent := fmt.Sprintf("go 1.25\n\nuse .\nuse ./%s\n", relSDK)
+	goWorkPath = filepath.Join(workspace, "go.work.tmp")
+	if err := os.WriteFile(goWorkPath, []byte(goWorkContent), 0644); err != nil {
+		return "", noop, fmt.Errorf("write go.work: %w", err)
+	}
+
+	cleanup = func() {
+		os.Remove(goWorkPath)
+		if !workspaceHasMod {
+			os.Remove(filepath.Join(workspace, "go.mod"))
+		}
+	}
+
+	return goWorkPath, cleanup, nil
+}
+
+func ExtractSDK(destDir string) error {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}
 
-	// Write package.json for module resolution
-	pkgJSON := `{"name": "openflow", "version": "0.1.0", "main": "index.ts", "types": "index.ts"}`
-	if err := os.WriteFile(filepath.Join(destDir, "package.json"), []byte(pkgJSON+"\n"), 0644); err != nil {
+	goMod := `module github.com/xhd2015/openflow/sdk
+
+go 1.25
+`
+	if err := os.WriteFile(filepath.Join(destDir, "go.mod"), []byte(goMod), 0644); err != nil {
 		return err
 	}
 

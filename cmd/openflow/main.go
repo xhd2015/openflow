@@ -14,7 +14,9 @@ import (
 	agentexec "github.com/xhd2015/agent-pro/agent/exec"
 	lessflags "github.com/xhd2015/less-flags"
 	"github.com/xhd2015/openflow/internal/creator"
+	"github.com/xhd2015/openflow/internal/lint"
 	"github.com/xhd2015/openflow/internal/runner"
+	skillinstall "github.com/xhd2015/skills/install"
 )
 
 func main() {
@@ -37,6 +39,10 @@ func run(args []string) error {
 		return runOpenflowRun(args[1:])
 	case "exec":
 		return runExec(args[1:])
+	case "lint":
+		return runLint(args[1:])
+	case "skill":
+		return runSkill(args[1:])
 	case "status":
 		return fmt.Errorf("status not yet implemented")
 	case "trace":
@@ -299,33 +305,105 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func runLint(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("file is required\n%s", lintHelp)
+	}
+	var failed bool
+	for _, f := range args {
+		if err := lint.Run(f, os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "openflow: %s has errors\n", f)
+			failed = true
+		}
+	}
+	if failed {
+		return fmt.Errorf("lint failed")
+	}
+	return nil
+}
+
+func runSkill(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("expected skill sub-command: show, install\n%s", skillHelp)
+	}
+	switch args[0] {
+	case "show":
+		return runSkillShow(args[1:])
+	case "install":
+		return runSkillInstall(args[1:])
+	case "-h", "--help":
+		fmt.Print(skillHelp)
+		return nil
+	default:
+		return fmt.Errorf("unknown skill sub-command: %s\n%s", args[0], skillHelp)
+	}
+}
+
+func runSkillShow(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("skill show takes no arguments\n%s", skillShowHelp)
+	}
+	fmt.Print(creator.SystemPromptTemplate)
+	return nil
+}
+
+func runSkillInstall(args []string) error {
+	return skillinstall.HandleInstall(skillinstall.InstallOptions{
+		SkillDirName: "openflow",
+		SkillContent: creator.SystemPromptTemplate,
+		Usage:        "openflow skill install",
+	}, args)
+}
+
 const help = `usage: openflow <command>
 
 commands:
-  create   generate a .openflow.ts from a description
-  run      execute a .openflow.ts
+  create   generate a .openflow.go from a description
+  run      execute a .openflow.go
+  lint     validate a .openflow.go (Go syntax)
   exec     run a single agent task (used by SDK)
+  skill    show or install the openflow skill
   status   show workflow runs
   trace    open trace viewer
 `
 
 const createHelp = `usage: openflow create <description> [options]
 
-Generate a .openflow.ts file from a natural language description.
+Generate a .openflow.go file from a natural language description.
 
 options:
-  --out FILE          output file path (default: <slug>.openflow.ts)
+  --out FILE          output file path (default: <slug>.openflow.go)
   --dir DIR           workspace directory
   --agent-runner RUNNER  agent runner: codex, opencode, cursor (default: opencode)
   --model MODEL       model override
 `
 
-const runHelp = `usage: openflow run <file.openflow.ts> [options]
+const runHelp = `usage: openflow run <file.openflow.go> [options]
 
-Execute a .openflow.ts workflow file.
+Execute a .openflow.go workflow file.
 
 options:
   --dir DIR           workspace directory
   --agent-runner RUNNER  default agent runner for workflow agents
   --model MODEL       default model for workflow agents
+`
+
+const lintHelp = `usage: openflow lint <file.openflow.go> [files...]
+
+Validate .openflow.go files using go build and go vet.
+Prints errors to stderr. Exits non-zero on build or vet errors.
+`
+
+const skillHelp = `usage: openflow skill <sub-command>
+
+sub-commands:
+  show     show the openflow skill content (SYSTEM_PROMPT.md)
+  install  install the openflow skill to a directory
+
+Run openflow skill <sub-command> -h for more details.
+`
+
+const skillShowHelp = `usage: openflow skill show
+
+Show the content of the openflow skill (SYSTEM_PROMPT.md).
 `

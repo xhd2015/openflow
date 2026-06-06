@@ -2,3 +2,7 @@ github.com/xhd2015/agent-pro v0.0.13 h1:mOa3Nu5kt7ep0Hv9EIXfMV7vD9IHkKL2W4MJ+sHv
 github.com/xhd2015/agent-pro v0.0.13/go.mod h1:YrpXoLboXr5XEiJpJtLsiTCyjXIm9EgISdL5uH4qwO0=
 github.com/xhd2015/less-flags v1.0.0 h1:ay8YG0WSXn59CAwBYUcAsq7l+mUwDEMUqaW/Fy0ZoCM=
 github.com/xhd2015/less-flags v1.0.0/go.mod h1:HGGM7JrrfZm/RvmxBQT96jF916m9UQE8vELpejQaoIo=
+github.com/xhd2015/less-gen v0.0.19 h1:JllrPhx3HzN+f2AB6cTvW9aRCpvuODJFx7affpa0zQY=
+github.com/xhd2015/less-gen v0.0.19/go.mod h1:Ym5HW/yfVnf2mgSo48QsuHAKnMTPv/u7oqty+raTnTQ=
+github.com/xhd2015/skills v0.0.7 h1:ZaIpDzngdjGhNi6AoQxaI44NS5XVTqlzTJNLK8aiT+0=
+github.com/xhd2015/skills v0.0.7/go.mod h1:iPdgYcxXrGeI7rnr8vBBhQf82sbg+2NqAeOrw2Bow5w=

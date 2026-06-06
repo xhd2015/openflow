@@ -19,6 +19,7 @@ func run() int {
 	_, _ = lessflags.Bool("--keep-temp", &keepTemp).Parse(os.Args[1:])
 
 	start := time.Now()
+	success := false
 
 	pass := func(label string) {
 		fmt.Printf("  %-55s PASS\n", label)
@@ -35,19 +36,16 @@ func run() int {
 		fail("temp dir", err.Error())
 		return 1
 	}
-	if !keepTemp {
-		defer func() {
+	defer func() {
+		if !success && !keepTemp {
 			_ = os.RemoveAll(dir)
-		}()
-	} else {
-		fmt.Printf("temp dir (--keep-temp): %s\n", dir)
-		defer func() {
-			fmt.Printf("temp dir kept: %s\n", dir)
-		}()
-	}
+			return
+		}
+		fmt.Printf("temp dir kept: %s\n", dir)
+	}()
 
-	exampleSrc := filepath.Join("test", "integrations", "run-example", "example.openflow.ts")
-	exampleDst := filepath.Join(dir, "example.openflow.ts")
+	exampleSrc := filepath.Join("test", "integrations", "run-example", "example.openflow.go")
+	exampleDst := filepath.Join(dir, "example.openflow.go")
 	if out, err := exec.Command("cp", exampleSrc, exampleDst).CombinedOutput(); err != nil {
 		fail("copy example", fmt.Sprintf("%s\n%s", err, out))
 		printTiming(start)
@@ -83,6 +81,7 @@ func run() int {
 	}
 	pass("openflow run exited cleanly")
 
+	success = true
 	fmt.Printf("--- PASS: TestOpenflowRunExample (%.1fs)\n", time.Since(start).Seconds())
 	return 0
 }

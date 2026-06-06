@@ -6,11 +6,20 @@ Write a `.openflow.ts` file using `Agent`, `shell`, and `step`. Run it. It keeps
 
 ## Install
 
-```bash
+```sh
 go install github.com/xhd2015/openflow@latest
 ```
 
-Requires: `bun`
+Use as skill in `opencode`, `codex` etc:
+
+```sh
+# Install to .agents/skills/openflow/ (default)
+openflow skill install
+
+# View the skill definition
+openflow skill show
+```
+
 Agent Runner: `opencode` (or `codex`/`cursor`).
 
 ## Usage

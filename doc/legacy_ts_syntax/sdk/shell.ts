@@ -19,7 +19,7 @@ export async function shell(cmd: string, opts?: ShellOptions): Promise<ShellResu
   const proc = Bun.spawn({
     cmd: ["sh", "-c", cmd],
     cwd: opts?.cwd || undefined,
-    env: opts?.env ? { ...process.env, ...opts.env } : undefined,
+    env: opts?.env || process.env,
     stdout: "pipe",
     stderr: "pipe",
   });
