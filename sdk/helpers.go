@@ -6,6 +6,11 @@ import (
 	"strings"
 )
 
+type Feedback interface {
+	String() string
+	ToAgent(agentName string) string
+}
+
 func Print(msg string) {
 	fmt.Println(msg)
 }
@@ -38,4 +43,8 @@ func quoteArg(arg string) string {
 		return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
 	}
 	return arg
+}
+
+func truncateBytes(b []byte, max int) string {
+	return truncateStr(string(b), max)
 }

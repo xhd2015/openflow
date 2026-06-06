@@ -17,7 +17,7 @@ func main() {
 	result := ""
 
 	Step("GREET", func() {
-		output, err := agent.Run("Say 'hello from openflow' and nothing else", RunOpts{})
+		output, _, err := agent.Run("Say 'hello from openflow' and nothing else", RunOpts{})
 		if err != nil {
 			panic(err)
 		}
@@ -25,7 +25,7 @@ func main() {
 	})
 
 	Step("VERIFY", func() {
-		r := Shell("echo 'done'")
+		r := Shell("echo 'done'", ShellOpts{Name: "verify"})
 		Print(strings.TrimSpace(r.Stdout))
 	})
 

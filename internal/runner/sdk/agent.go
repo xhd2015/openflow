@@ -4,8 +4,10 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -51,21 +53,44 @@ func NewAgent(opts AgentOpts) *Agent {
 }
 
 type RunOpts struct {
-	Feedback string
+	Feedbacks []Feedback
 }
 
-func (a *Agent) Run(task string, opts RunOpts) (string, error) {
-	feedback := opts.Feedback
-	isResume := !a.isFirstRun && feedback != "" && task == a.lastTask
+type AgentOutput struct {
+	ShellSuggestions map[string]string
+}
+
+func (a *Agent) Run(task string, opts RunOpts) (string, *AgentOutput, error) {
+	isResume := !a.isFirstRun && len(opts.Feedbacks) > 0 && task == a.lastTask
 	a.lastTask = task
+
+	home := envOr("OPENFLOW_HOME", "")
+	runID := os.Getenv("OPENFLOW_RUN_ID")
+
+	var msgDir string
+	if home != "" && runID != "" {
+		msgDir = filepath.Join(home, "runs", runID, "agents", a.name)
+		os.MkdirAll(msgDir, 0755)
+	}
 
 	var prompt string
 	if isResume {
-		prompt = "# Feedback\n" + feedback
-		logMsg("agent", a.name+" resume: \""+truncateStr(feedback, 100)+"\"")
+		var parts []string
+		for _, fb := range opts.Feedbacks {
+			fbStr := fb.ToAgent(a.name)
+			parts = append(parts, fbStr)
+			logMsg("agent", a.name+" feedback: \""+truncateStr(fbStr, 1024)+"\"")
+			writeAgentMessage(msgDir, "feedback", fbStr)
+		}
+		prompt = "# Feedback\n" + strings.Join(parts, "\n\n")
 	} else {
 		prompt = a.systemPrompt + "\n\n# Task\n" + task
-		logMsg("agent", a.name+" run: \""+truncateStr(task, 100)+"\"")
+		if a.isFirstRun {
+			logMsg("agent", a.name+" run: \""+truncateStr(task, 1024)+"\"")
+		} else {
+			logMsg("agent", a.name+" run (no feedback, fresh start): \""+truncateStr(task, 1024)+"\"")
+		}
+		writeAgentMessage(msgDir, "prompt", task)
 	}
 
 	startMs := time.Now()
@@ -78,6 +103,12 @@ func (a *Agent) Run(task string, opts RunOpts) (string, error) {
 		Resume:    isResume,
 		Timestamp: time.Now().Format(time.RFC3339),
 	})
+
+	suggestionDir := ""
+	if home != "" && runID != "" {
+		suggestionDir = filepath.Join(home, "runs", runID, "agents", a.name, "shell_suggestions")
+		os.MkdirAll(suggestionDir, 0755)
+	}
 
 	args := []string{
 		"exec",
@@ -97,14 +128,8 @@ func (a *Agent) Run(task string, opts RunOpts) (string, error) {
 	}
 	args = append(args, "--dir", dir)
 
-	runID := os.Getenv("OPENFLOW_RUN_ID")
 	if runID != "" {
-		home := envOr("OPENFLOW_HOME", "")
-		if home == "" {
-			home, _ = os.UserHomeDir()
-			home += "/.openflow"
-		}
-		args = append(args, "--trace-dir", home+"/runs/"+runID+"/agents/"+a.name)
+		args = append(args, "--trace-dir", filepath.Join(home, "runs", runID, "agents", a.name))
 	}
 
 	openflowBin := envOr("OPENFLOW_BIN", "openflow")
@@ -113,7 +138,7 @@ func (a *Agent) Run(task string, opts RunOpts) (string, error) {
 		cmdStr += " " + quoteArg(arg)
 	}
 
-	result := Shell(cmdStr)
+	result := Shell(cmdStr, ShellOpts{Name: a.name + "-exec"})
 	durationMs := time.Since(startMs).Milliseconds()
 
 	if a.isFirstRun {
@@ -123,19 +148,26 @@ func (a *Agent) Run(task string, opts RunOpts) (string, error) {
 	if result.ExitCode != 0 {
 		logMsg("agent", fmt.Sprintf("%s failed (%dms): %s", a.name, durationMs, truncateStr(result.Stderr, 200)))
 		emitEvent(Event{
-			Type:        "agent",
-			Agent:       a.name,
-			Status:      "failed",
-			Prompt:      task,
-			Error:       result.Stderr,
-			DurationMs:  durationMs,
-			Timestamp:   time.Now().Format(time.RFC3339),
+			Type:       "agent",
+			Agent:      a.name,
+			Status:     "failed",
+			Prompt:     task,
+			Error:      result.Stderr,
+			DurationMs: durationMs,
+			Timestamp:  time.Now().Format(time.RFC3339),
 		})
-		return "", fmt.Errorf("agent run failed (exit %d): %s", result.ExitCode, result.Stderr)
+		return "", nil, fmt.Errorf("agent run failed (exit %d): %s", result.ExitCode, result.Stderr)
 	}
 
 	output := strings.TrimSpace(result.Stdout)
 	logMsg("agent", fmt.Sprintf("%s done (%.1fs)", a.name, float64(durationMs)/1000))
+
+	writeAgentMessage(msgDir, "output", truncateStr(output, 1024))
+
+	printOutput := truncateStr(output, 1024)
+	if printOutput != "" {
+		Print(printOutput)
+	}
 
 	emitEvent(Event{
 		Type:       "agent",
@@ -147,7 +179,64 @@ func (a *Agent) Run(task string, opts RunOpts) (string, error) {
 		Timestamp:  time.Now().Format(time.RFC3339),
 	})
 
-	return output, nil
+	agentOutput := &AgentOutput{
+		ShellSuggestions: make(map[string]string),
+	}
+
+	if suggestionDir != "" {
+		entries, err := os.ReadDir(suggestionDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				if !strings.HasSuffix(name, ".sh") || strings.Contains(name, "_") {
+					continue
+				}
+				shellName := strings.TrimSuffix(name, ".sh")
+				content, err := os.ReadFile(filepath.Join(suggestionDir, name))
+				if err != nil {
+					continue
+				}
+				suggestedCmd := strings.TrimSpace(string(content))
+				if suggestedCmd != "" {
+					agentOutput.ShellSuggestions[shellName] = suggestedCmd
+					logMsg("agent", fmt.Sprintf("%s suggestion: %s => %s", a.name, shellName, truncateStr(suggestedCmd, 80)))
+				}
+				ts := time.Now().Format("20060102_150405")
+				archivedName := shellName + "_" + ts + ".sh"
+				os.Rename(filepath.Join(suggestionDir, name), filepath.Join(suggestionDir, archivedName))
+			}
+		}
+	}
+
+	return output, agentOutput, nil
+}
+
+func writeAgentMessage(msgDir, msgType, content string) {
+	if msgDir == "" {
+		return
+	}
+	msg := struct {
+		Type      string `json:"type"`
+		Content   string `json:"content"`
+		Timestamp string `json:"timestamp"`
+	}{
+		Type:      msgType,
+		Content:   content,
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(msgDir, "messages.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	f.Write(append(data, '\n'))
 }
 
 func deriveAgentName(systemPrompt string) string {

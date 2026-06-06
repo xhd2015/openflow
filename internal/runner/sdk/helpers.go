@@ -3,16 +3,20 @@ package sdk
 import (
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 )
+
+type Feedback interface {
+	String() string
+	ToAgent(agentName string) string
+}
 
 func Print(msg string) {
 	fmt.Println(msg)
 }
 
-func S(v int) string {
-	return strconv.Itoa(v)
+func S(v any) string {
+	return fmt.Sprint(v)
 }
 
 func logMsg(label string, msg string) {
@@ -39,4 +43,8 @@ func quoteArg(arg string) string {
 		return "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
 	}
 	return arg
+}
+
+func truncateBytes(b []byte, max int) string {
+	return truncateStr(string(b), max)
 }

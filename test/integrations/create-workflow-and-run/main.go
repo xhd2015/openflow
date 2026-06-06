@@ -16,7 +16,7 @@ func main() {
 }
 
 func run() int {
-	var keepTemp bool
+	var keepTemp bool = true
 	_, _ = lessflags.Bool("--keep-temp", &keepTemp).Parse(os.Args[1:])
 
 	start := time.Now()
@@ -37,6 +37,7 @@ func run() int {
 		fail("temp dir", err.Error())
 		return 1
 	}
+	fmt.Printf("temp dir created: %s\n", dir)
 	defer func() {
 		if !success && !keepTemp {
 			_ = os.RemoveAll(dir)
@@ -101,7 +102,6 @@ func run() int {
 		printTiming(start)
 		return 1
 	}
-	pass("openflow create: file exists")
 	if info.Size() == 0 {
 		fail("openflow create: file non-empty", "file is 0 bytes")
 		printTiming(start)
@@ -115,6 +115,12 @@ func run() int {
 		printTiming(start)
 		return 1
 	}
+
+	time.Sleep(1000 * time.Second)
+
+	pass("openflow create: file exists")
+	fmt.Printf("=====openflow======\n%s\n=====openflow======\n", string(content))
+
 	if !strings.Contains(string(content), "Agent") && !strings.Contains(string(content), "openflow") {
 		fail("openflow create: contains openflow primitive",
 			"generated file does not reference Agent or openflow")

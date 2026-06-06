@@ -17,9 +17,8 @@ All SDK functions are available without prefix after a dot import.
 
 An agent invokes an LLM through `openflow exec` to do work (edit files, run commands, etc.).
 The `task` describes WHAT to do; the `systemPrompt` controls HOW.
-On the first call, the full systemPrompt + task is sent. On subsequent calls with
-`{Feedback: feedback}`, the agent enters resume mode — only the feedback is sent to continue
-the existing session.
+On subsequent calls with `{Feedbacks: feedbacks}`, the agent enters resume mode — feedbacks are sent to continue
+the existing session. Agent.Run returns the agent's text response, an AgentOutput (containing shell suggestions), and an error.
 
 ```go
 type AgentOpts struct {
@@ -32,27 +31,68 @@ type AgentOpts struct {
 func NewAgent(opts AgentOpts) *Agent
 
 type RunOpts struct {
-    Feedback string
+    Feedbacks []Feedback
 }
 
-func (a *Agent) Run(task string, opts RunOpts) (string, error)
+type AgentOutput struct {
+    ShellSuggestions map[string]string  // shellName -> suggested command
+}
+
+func (a *Agent) Run(task string, opts RunOpts) (string, *AgentOutput, error)
 ```
 
 ### Shell
 
 Runs a shell command. Does NOT panic on non-zero exit — check ExitCode.
-`Feedback` is always present, ready to pass to `agent.Run(task, RunOpts{Feedback: feedback})`.
+Each shell invocation has a meaningful name (set via ShellOpts.Name), used in feedback for the agent
+to identify which command to suggest a change for.
+
+When the agent receives shell failure feedback, it may write a corrected command to the
+`shell_suggestions/<name>.sh` file inside the agent's run directory. Agent.Run reads these
+files after the agent completes and returns them in AgentOutput.ShellSuggestions.
 
 ```go
+type ShellOpts struct {
+    Name string  // meaningful name, e.g. "test", "build"
+    Dir  string  // optional working directory override
+}
+
+type ShellFeedback struct {
+    Name     string
+    Cmd      string
+    Pwd      string
+    ExitCode int
+    Stdout   string
+    Stderr   string
+}
+
+// ShellFeedback implements Feedback
+func (f ShellFeedback) String() string
+func (f ShellFeedback) ToAgent(agentName string) string  // XML, ≤1024 chars
+
 type ShellResult struct {
+    Name     string
+    Cmd      string
+    Pwd      string      // absolute path where the shell ran
     Stdout   string
     Stderr   string
     ExitCode int
-    Feedback string
+    Feedback ShellFeedback
 }
 
-func Shell(cmd string) ShellResult
+func Shell(cmd string, opts ShellOpts) ShellResult
 ```
+
+### Feedback
+
+```go
+type Feedback interface {
+    String() string
+    ToAgent(agentName string) string  // format for a specific agent
+}
+```
+
+ShellFeedback implements Feedback. Multiple Feedback values can be passed to agent.Run().
 
 ### Step
 
@@ -66,7 +106,7 @@ func Step(label string, fn func())
 
 ```go
 func Print(msg string)  // prints a line to stdout
-func S(v int) string    // int to string
+func S(v any) string    // converts any value to string
 ```
 
 ## Rules
@@ -78,7 +118,9 @@ func S(v int) string    // int to string
 - Use agent.Run() for code changes, Shell() for commands
 - Do NOT use Shell() for editing files — use agent.Run() for that
 - Always check the error from agent.Run() and Shell().ExitCode
-- On error, Print() a message and use the error/feedback for the next iteration
+- Give each Shell() a meaningful ShellOpts.Name (e.g. "test", "build", "lint")
+- On error, pass ShellResult.Feedback to agent.Run() as feedback so the agent can suggest fixes
+- If agent.Run() returns ShellSuggestions, use them to update the shell command for the next iteration
 
 ## Example — Single Agent
 
@@ -92,33 +134,42 @@ func main() {
         SystemPrompt: "You are a Go programmer. Write clean, tested code.",
     })
 
-    feedback := ""
     done := false
     i := 0
     const MAX = 5
+    testCmd := "go test ./..."
+
+    feedbacks := []Feedback{} // no feedback on inital task
 
     for !done && i < MAX {
         i++
         Step("ITERATION "+S(i), func() {
             Step("CODE CHANGE", func() {
-                _, err := coder.Run("Fix the bug in merge.go", RunOpts{Feedback: feedback})
+                _, coderExtra, err := coder.Run("Fix the bug in merge.go", RunOpts{Feedbacks: feedbacks})
                 if err != nil {
                     Print("agent failed: " + err.Error())
-                    feedback = err.Error()
                     return
                 }
+                if coderExtra != nil {
+                    if newCmd := coderExtra.ShellSuggestions["test"]; newCmd != "" {
+                        testCmd = newCmd
+                    }
+                }
             })
-            feedback = ""
 
+            iterFeedbacks := []Feedback{} // collect feedbacks
             Step("BUILD & TEST", func() {
-                r := Shell("go test ./...")
+                r := Shell(testCmd, ShellOpts{Name: "test"})
                 if r.ExitCode == 0 {
                     done = true
                     return
                 }
                 Print("test failed: exit " + S(r.ExitCode))
-                feedback = r.Feedback
+                iterFeedbacks = append(iterFeedbacks,r.Feedback)
             })
+
+            // always assign with iteration feedbacks
+            feedbacks = iterFeedbacks
         })
     }
 
@@ -151,44 +202,51 @@ func main() {
         SystemPrompt: "You review Go code for bugs and style issues.",
     })
 
-    feedback := ""
     done := false
     i := 0
+    buildCmd := "go build ./..."
+
+    feedbacks := []Feedback{} // no feedback on inital task
 
     for !done && i < 5 {
         i++
         Step("CODING "+S(i), func() {
             Step("IMPLEMENT", func() {
-                _, err := coder.Run("Implement an HTTP handler for GET /users", RunOpts{Feedback: feedback})
+                feedbacks := []Feedback{}
+                _, coderExtra, err := coder.Run("Implement an HTTP handler for GET /users", RunOpts{Feedbacks: feedbacks})
                 if err != nil {
                     Print("coder failed: " + err.Error())
-                    feedback = err.Error()
                     return
+                }
+                if coderExtra != nil {
+                    if newCmd := coderExtra.ShellSuggestions["build"]; newCmd != "" {
+                        buildCmd = newCmd
+                    }
                 }
             })
 
-            r := Shell("go build ./...")
+            iterFeedbacks := []Feedback{} // collect feedbacks
+
+            r := Shell(buildCmd, ShellOpts{Name: "build"})
             if r.ExitCode != 0 {
                 Print("build failed: exit " + S(r.ExitCode))
-                feedback = r.Feedback
+                iterFeedbacks = append(iterFeedbacks,r.Feedback)
                 return
             }
 
             Step("REVIEW", func() {
-                review, err := reviewer.Run(
+                review, _, err := reviewer.Run(
                     "Review this change for bugs",
-                    RunOpts{Feedback: r.Feedback},
+                    RunOpts{Feedbacks: []Feedback{r.Feedback}},
                 )
                 if err != nil {
                     Print("reviewer failed: " + err.Error())
-                    feedback = err.Error()
                     return
                 }
                 if strings.Contains(strings.ToLower(review), "pass") {
                     done = true
                 } else {
                     Print("reviewer found issues")
-                    feedback = "reviewer found issues: " + review
                 }
             })
         })

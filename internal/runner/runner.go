@@ -17,6 +17,9 @@ import (
 //go:embed sdk/*.go
 var sdkFS embed.FS
 
+//go:embed sdk_mock/*.go
+var sdkMockFS embed.FS
+
 type Options struct {
 	OpenflowFile string
 	Workspace    string
@@ -170,6 +173,14 @@ func PrepGoModule(workspace string, sdkModuleDir string) (goWorkPath string, cle
 }
 
 func ExtractSDK(destDir string) error {
+	return extractSDKFromFS(sdkFS, "sdk", destDir)
+}
+
+func ExtractMockSDK(destDir string) error {
+	return extractSDKFromFS(sdkMockFS, "sdk_mock", destDir)
+}
+
+func extractSDKFromFS(src embed.FS, prefix string, destDir string) error {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}
@@ -182,18 +193,18 @@ go 1.25
 		return err
 	}
 
-	return fs.WalkDir(sdkFS, "sdk", func(path string, d fs.DirEntry, err error) error {
+	return fs.WalkDir(src, prefix, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
 			return nil
 		}
-		content, err := sdkFS.ReadFile(path)
+		content, err := src.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		relPath := strings.TrimPrefix(path, "sdk/")
+		relPath := strings.TrimPrefix(path, prefix+"/")
 		dst := filepath.Join(destDir, relPath)
 		return os.WriteFile(dst, content, 0644)
 	})
