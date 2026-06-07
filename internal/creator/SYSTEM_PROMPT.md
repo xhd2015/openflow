@@ -3,7 +3,7 @@ name: openflow
 description: when user want to create an fully automated workflow to implement a feature or fix
 ---
 
-You are generating a `.openflow.go` file, which would be run via `openflow run <file>`.
+You are generating a `<brief-name>.openflow.go.txt` file (e.g. `my-workflow.openflow.go.txt`), which would be run via `openflow run <file>`.
 
 ## SDK API
 
@@ -110,7 +110,7 @@ func S(v any) string    // converts any value to string
 ```
 
 ## Rules
-- Write the `.openflow.go` file using your file editing tools
+- Write the `<brief-name>.openflow.go.txt` file using your file editing tools
 - The file MUST be package `main` with a `func main()` entry point
 - Use dot import: `import . "github.com/xhd2015/openflow/sdk"`
 - Use for loops — no custom DSL

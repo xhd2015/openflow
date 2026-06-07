@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	agentprovider "github.com/xhd2015/agent-pro/agent/cli/provider"
 	"github.com/xhd2015/agent-pro/agent/cli/registry"
+	"github.com/xhd2015/agent-pro/agent_trace/events"
 	agentexec "github.com/xhd2015/agent-pro/agent/exec"
 	lessflags "github.com/xhd2015/less-flags"
 	"github.com/xhd2015/openflow/internal/creator"
@@ -122,6 +122,15 @@ func runOpenflowRun(args []string) error {
 	return err
 }
 
+type rawLogWriter struct{ log events.Logger }
+
+func (w *rawLogWriter) Write(p []byte) (int, error) {
+	if w == nil || w.log == nil {
+		return len(p), nil
+	}
+	return len(p), w.log.Append(p)
+}
+
 func runExec(args []string) error {
 	var prompt string
 	var dir string
@@ -176,22 +185,17 @@ func runExec(args []string) error {
 		return fmt.Errorf("build agent runner: %w", err)
 	}
 
-	var rawLog io.Writer
-	var logFile *os.File
+	var eventLog events.Logger
 	if traceDir != "" {
-		if err := os.MkdirAll(traceDir, 0755); err == nil {
-			f, err := os.Create(filepath.Join(traceDir, "events.jsonl"))
-			if err == nil {
-				rawLog = f
-				logFile = f
-			}
-		}
+		eventLog, _ = events.Open(filepath.Join(traceDir, "events.jsonl"))
 	}
 
 	askOpts := &registry.AskOptions{
 		Model:     firstNonEmpty(model, os.Getenv("OPENFLOW_MODEL"), ""),
 		Workspace: absWorkspace,
-		RawLog:    rawLog,
+	}
+	if eventLog != nil {
+		askOpts.RawLog = &rawLogWriter{eventLog}
 	}
 
 	openflowHome := resolveOpenflowHome()
@@ -205,15 +209,14 @@ func runExec(args []string) error {
 
 	answer, err := provider.Agent.Ask(context.Background(), prompt, askOpts, func(delta string) {})
 	if err != nil {
-		if logFile != nil {
-			logFile.Close()
+		if eventLog != nil {
+			eventLog.Close()
 		}
 		return fmt.Errorf("agent exec: %w", err)
 	}
 
-	if logFile != nil {
-		logFile.Close()
-		logFile = nil
+	if eventLog != nil {
+		eventLog.Close()
 	}
 
 	if session != "" && !resume {
